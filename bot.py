@@ -1,13 +1,15 @@
-import telebot
-from telebot.types import Message, User, Chat
-from os import getenv
 from dataclasses import dataclass, field
-import json
-from typing import List
-from random import shuffle, choice, sample
 import db
 import dict
+import json
+from logging import getLogger
+from os import getenv
+from random import shuffle, choice, sample
+import telebot
+from telebot.types import Message, User, Chat
+from typing import List
 
+logger = getLogger()
 
 
 class Settings:
@@ -19,8 +21,6 @@ class Settings:
         return value
 
     TOKEN = _load_setting("eng_lish_card_bot")
-
- 
 
 
 class ChatStates:
@@ -49,64 +49,61 @@ class ChatState:
     correct_option: str = None
 
 
-bot = None
+bot = telebot.TeleBot(Settings.TOKEN)
 chat_state = None
 known_chats = {}
 
 
 def run_bot():
-    global bot
-    bot = telebot.TeleBot(Settings.TOKEN)
-
-    @bot.message_handler(commands=["start"])
-    def start_new_chat(message):
-        send_welcome()
-        send_new_word()
-
-    @bot.message_handler()
-    def message_handler(message: Message):
-        print_message(message)
-        if (
-            get_chat_state(message) == ChatStates.NEW
-            or message.text.lower() == "/start"
-        ):
-            send_welcome()
-            send_new_word()
-        else:
-            match chat_state.current:
-                case ChatStates.TRAIN:
-                    # assume attempt to guess a word
-                    user_option = message.text.lower()
-                    if user_option == chat_state.correct_option:
-                        correct_guess()
-                    else:
-                        wrong_guess()
-                case ChatStates.ADD_WORD:
-                    if message.text == Buttons.ADD:
-                        # the add button was pressed
-                        send_message(
-                            "Введите слово, которое хотите добавить, - на русскои или английском"
-                        )
-                    else:
-                        # the user entered a new word
-                        add_word(message.text)
-                        send_new_word()
-                case ChatStates.DELETE_WORD:
-                    delete_word(chat_state.current_word)
-                case ChatStates.SKIP_WORD:
-                    send_message("Перейдем к следующему слову")
-                    send_new_word()
-                case _:
-                    # state not catched elsewhere
-                    # assume it's a new user
-                    start_new_chat()
-
     bot.infinity_polling()
 
 
-def print_message(message: Message):
+@bot.message_handler(commands=["start"])
+def start_new_chat(message):
+    get_chat_state(message)
+    send_welcome()
+    send_new_word()
+
+
+@bot.message_handler()
+def message_handler(message: Message):
+    log_message(message)
+    if get_chat_state(message) == ChatStates.NEW or message.text.lower() == "/start":
+        send_welcome()
+        send_new_word()
+    else:
+        match chat_state.current:
+            case ChatStates.TRAIN:
+                # assume attempt to guess a word
+                user_option = message.text.lower()
+                if user_option == chat_state.correct_option:
+                    correct_guess()
+                else:
+                    wrong_guess()
+            case ChatStates.ADD_WORD:
+                if message.text == Buttons.ADD:
+                    # the add button was pressed
+                    send_message(
+                        "Введите слово, которое хотите добавить, - на русскои или английском"
+                    )
+                else:
+                    # the user entered a new word
+                    add_word(message.text)
+                    send_new_word()
+            case ChatStates.DELETE_WORD:
+                delete_word(chat_state.current_word)
+            case ChatStates.SKIP_WORD:
+                send_message("Перейдем к следующему слову")
+                send_new_word()
+            case _:
+                # state not catched elsewhere
+                # assume it's a new user
+                start_new_chat()
+
+
+def log_message(message: Message):
     pretty_json = json.dumps(message.json, indent=4)
-    print(
+    logger.debug(
         f"""
 Message received: {type(message)} {message.content_type}
     User id:    {message.from_user.id}  {message.from_user.username}
@@ -131,7 +128,7 @@ def get_chat_state(message: Message):
                 set_chat_state(ChatStates.DELETE_WORD)
             case Buttons.SKIP:
                 set_chat_state(ChatStates.SKIP_WORD)
-        print("Chat state found", cid, chat_state.current)
+        logger.debug("Chat state found", cid, chat_state.current)
     else:
         chat_state = ChatState(
             cid=cid,
@@ -141,15 +138,15 @@ def get_chat_state(message: Message):
             chat=message.chat,
         )
         known_chats[cid] = chat_state
-        print("Chat state added", cid, chat_state.current)
-    print(chat_state)
+        logger.debug("Chat state added", cid, chat_state.current)
+    logger.debug(chat_state)
     return chat_state.current
 
 
 def set_chat_state(new_state):
     chat_state.current = new_state
-    print("Chat state updated")
-    print(chat_state)
+    logger.debug("Chat state updated")
+    logger.debug(chat_state)
 
 
 def send_message(*args, **kwargs):
@@ -187,12 +184,12 @@ def send_new_word():
 
     usage_examples = dict.fetch_examples(chat_state.correct_option)
     if usage_examples:
-        examples = '\n\n'.join(usage_examples[:2])
-        word_message += f'''
+        examples = "\n\n".join(usage_examples[:2])
+        word_message += f"""
 
-Примеры использования слова:
+Примеры употребления слова:
 
-{examples}'''
+{examples}"""
 
     shuffle(chat_state.word_options)
     markup = telebot.types.ReplyKeyboardMarkup(row_width=2)
@@ -233,7 +230,9 @@ def add_word(word):
     is_russian = any("а" <= char <= "я" for char in word.lower())
     translation = dict.translate(word, is_russian)
     if not translation:
-        send_message(f"Перевод слова '{word}' не найден в словаре. Не могу добавить. Возвращаюсь к тренировке.")
+        send_message(
+            f"Перевод слова '{word}' не найден в словаре. Не могу добавить. Возвращаюсь к тренировке."
+        )
         return
     if is_russian:
         db.add_user_word(chat_state.user.id, translation, word)

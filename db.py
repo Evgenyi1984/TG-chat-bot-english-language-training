@@ -1,5 +1,9 @@
+from dotenv import load_dotenv
+from logging import getLogger
 from os import getenv
 from psycopg2 import connect
+
+load_dotenv()
 
 
 class Settings:
@@ -14,13 +18,19 @@ class Settings:
     POSTGRES_DBNAME = _load_setting("postgres_dbname")
     POSTGRES_USER = _load_setting("postgres_user")
     POSTGRES_PASS = _load_setting("postgres_pass")
+    LOG_FILE = _load_setting("log_file", False)
+    LOG_LEVEL = _load_setting("log_level", False)
+    LOG_TO_CONSOLE = _load_setting("log_level", False)
 
 
 conn = None
 
+logger = getLogger()
+
 
 def open_db():
     global conn
+    logger.debug(f"Подключение к базе '{Settings.POSTGRES_DBNAME}'")
     conn = connect(
         host=Settings.POSTGRES_SERVER,
         database=Settings.POSTGRES_DBNAME,
@@ -118,7 +128,7 @@ WHERE uid = %s;
             (uid, uid),
         )
         all_records = cur.fetchall()
-        print(f"\n{len(all_records)} words retreived for user {uid}\n")
+        logger.debug(f"{len(all_records)} слов в базе для пользователя {uid}")
         return all_records
 
 
